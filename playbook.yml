@@ -88,6 +88,29 @@
       community.general.ufw:
         state: enabled
 
+    - name: Check UFW before.rules exists
+      ansible.builtin.stat:
+        path: /etc/ufw/before.rules
+      register: ufw_before_rules
+
+    - name: Fail if UFW before.rules does not exist
+      ansible.builtin.fail:
+        msg: "/etc/ufw/before.rules not found. Is UFW installed?"
+      when: not ufw_before_rules.stat.exists
+
+    - name: Drop IPv4 ICMP echo requests in UFW before.rules
+      ansible.builtin.replace:
+        path: /etc/ufw/before.rules
+        regexp: '^-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT$'
+        replace: '-A ufw-before-input -p icmp --icmp-type echo-request -j DROP'
+        backup: true
+      register: ufw_icmp_drop
+
+    - name: Reload UFW if ICMP rule changed
+      community.general.ufw:
+        state: reloaded
+      when: ufw_icmp_drop.changed
+
     - name: Configure Fail2Ban sshd jail
       ansible.builtin.copy:
         dest: /etc/fail2ban/jail.local
@@ -109,14 +132,6 @@
         name: fail2ban
         enabled: true
         state: restarted
-
-    - name: Disable IPv4 ICMP echo responses
-      ansible.posix.sysctl:
-        name: net.ipv4.icmp_echo_ignore_all
-        value: "1"
-        state: present
-        reload: true
-        sysctl_file: /etc/sysctl.d/99-disable-ping.conf
 
     - name: Harden SSH config - disable root login
       ansible.builtin.lineinfile:
