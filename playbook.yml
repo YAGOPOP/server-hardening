@@ -1,0 +1,130 @@
+---
+- name: Basic server hardening
+  hosts: servers
+  become: true
+
+  vars:
+    new_user: deploy
+    ssh_port: 22
+    allowed_ssh_service: OpenSSH
+    new_user_password_hash: '$6$wn7zWa/lxrw5P2nB$guOC.aZClaj9lb9kLKSSjt5d0W4Biv5b.6qX2D/IhkF8yPq5OKL/WE.aw3RRYFRTiGIaocNCVOvFTrPagOKJG0'
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Upgrade installed packages
+      ansible.builtin.apt:
+        upgrade: dist
+
+    - name: Install security packages
+      ansible.builtin.apt:
+        name:
+          - sudo
+          - ufw
+          - fail2ban
+          - unattended-upgrades
+        state: present
+
+    - name: Create sudo user
+      ansible.builtin.user:
+        name: "{{ new_user }}"
+        password: "{{ new_user_password_hash }}"
+        groups: sudo
+        append: true
+        shell: /bin/bash
+        create_home: true
+        state: present
+
+    - name: Add SSH public key for new user
+      ansible.posix.authorized_key:
+        user: "{{ new_user }}"
+        state: present
+        key: "{{ lookup('file', 'files/authorized_keys') }}"
+
+    - name: Allow SSH through UFW
+      community.general.ufw:
+        rule: allow
+        port: "{{ ssh_port }}"
+        proto: tcp
+
+    - name: Set UFW default incoming policy
+      community.general.ufw:
+        direction: incoming
+        policy: deny
+
+    - name: Set UFW default outgoing policy
+      community.general.ufw:
+        direction: outgoing
+        policy: allow
+
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+
+    - name: Configure Fail2Ban sshd jail
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.local
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [sshd]
+          enabled = true
+          port = {{ ssh_port }}
+          filter = sshd
+          backend = systemd
+          maxretry = 5
+          findtime = 10m
+          bantime = 1h
+
+    - name: Enable and start Fail2Ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        enabled: true
+        state: restarted
+
+    - name: Disable ICMP echo responses
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-disable-ping.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          net.ipv4.icmp_echo_ignore_all = 1
+
+    - name: Apply sysctl settings
+      ansible.builtin.command: sysctl --system
+      changed_when: false
+
+    - name: Harden SSH config - disable root login
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin no'
+        backup: true
+
+    - name: Harden SSH config - disable password authentication
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+        backup: true
+
+    - name: Harden SSH config - enable public key authentication
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PubkeyAuthentication'
+        line: 'PubkeyAuthentication yes'
+        backup: true
+
+    - name: Validate SSH config
+      ansible.builtin.command: sshd -t
+      changed_when: false
+
+    - name: Restart SSH service
+      ansible.builtin.systemd:
+        name: ssh
+        state: restarted
