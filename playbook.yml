@@ -10,16 +10,39 @@
     new_user_password_hash: '$6$wn7zWa/lxrw5P2nB$guOC.aZClaj9lb9kLKSSjt5d0W4Biv5b.6qX2D/IhkF8yPq5OKL/WE.aw3RRYFRTiGIaocNCVOvFTrPagOKJG0'
 
   tasks:
+    - name: Assert required variables are provided
+      ansible.builtin.assert:
+        that:
+          - new_user is defined
+          - new_user | length > 0
+          - new_user_password_hash is defined
+          - new_user_password_hash | length > 0
+          - public_key_path is defined
+          - public_key_path | length > 0
+          - ssh_port is defined
+        fail_msg: "Required variables are missing."
+
+    - name: Wait for apt/dpkg lock to be released
+      ansible.builtin.shell: |
+        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+           || fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+           || fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+          sleep 5
+        done
+      changed_when: false
+
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
+        lock_timeout: 300
 
     - name: Upgrade installed packages
       ansible.builtin.apt:
-        upgrade: dist
+        upgrade: safe
+        lock_timeout: 300
 
-    - name: Install security packages
+    - name: Install required packages
       ansible.builtin.apt:
         name:
           - sudo
@@ -27,6 +50,7 @@
           - fail2ban
           - unattended-upgrades
         state: present
+        lock_timeout: 300
 
     - name: Create sudo user
       ansible.builtin.user:
@@ -42,7 +66,7 @@
       ansible.posix.authorized_key:
         user: "{{ new_user }}"
         state: present
-        key: "{{ lookup('file', 'files/authorized_keys') }}"
+        key: "{{ lookup('file', public_key_path) }}"
 
     - name: Allow SSH through UFW
       community.general.ufw:
@@ -86,18 +110,13 @@
         enabled: true
         state: restarted
 
-    - name: Disable ICMP echo responses
-      ansible.builtin.copy:
-        dest: /etc/sysctl.d/99-disable-ping.conf
-        owner: root
-        group: root
-        mode: "0644"
-        content: |
-          net.ipv4.icmp_echo_ignore_all = 1
-
-    - name: Apply sysctl settings
-      ansible.builtin.command: sysctl --system
-      changed_when: false
+    - name: Disable IPv4 ICMP echo responses
+      ansible.posix.sysctl:
+        name: net.ipv4.icmp_echo_ignore_all
+        value: "1"
+        state: present
+        reload: true
+        sysctl_file: /etc/sysctl.d/99-disable-ping.conf
 
     - name: Harden SSH config - disable root login
       ansible.builtin.lineinfile:

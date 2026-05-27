@@ -80,7 +80,7 @@ unset USER_PASSWORD_CONFIRM
 
 cat > "${INVENTORY_FILE}" <<EOF
 [servers]
-target ansible_host=${SERVER_IP} ansible_user=root ansible_port=${SSH_PORT}
+target ansible_host=${SERVER_IP} ansible_user=root ansible_port=${SSH_PORT} ansible_python_interpreter=/usr/bin/python3
 EOF
 
 cat > "${VARS_FILE}" <<EOF
