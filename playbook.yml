@@ -7,7 +7,6 @@
     new_user: deploy
     ssh_port: 22
     allowed_ssh_service: OpenSSH
-    new_user_password_hash: '$6$wn7zWa/lxrw5P2nB$guOC.aZClaj9lb9kLKSSjt5d0W4Biv5b.6qX2D/IhkF8yPq5OKL/WE.aw3RRYFRTiGIaocNCVOvFTrPagOKJG0'
 
   tasks:
     - name: Assert required variables are provided
